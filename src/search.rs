@@ -1,14 +1,13 @@
 use std::{path::PathBuf, println, time::Instant};
-use anyhow::{Ok, Result};
-use walkdir::{DirEntry, WalkDir};
+use anyhow::Result;
 use globset::{GlobBuilder};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{HashMap};
 
 type FileIndex = HashMap<String, Vec<PathBuf>>;
 
 
 fn should_visit(entry: &DirEntry) -> bool {
-    if entry.file_type().is_file() {
+    if entry.file_type().expect("REASON").is_file() {
         return true;
     }
 
@@ -36,37 +35,47 @@ fn should_visit(entry: &DirEntry) -> bool {
 
 
 
-pub fn build_index(folder:&str)-> Result<FileIndex>{
-let mut index = FileIndex::new();
+use ignore::{DirEntry, WalkBuilder, WalkState};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc;
 
+pub fn build_index(folder: &str) -> Result<FileIndex> {
+    let (tx, rx) = mpsc::channel::<PathBuf>();
+    let errors = AtomicUsize::new(0);
 
- for entry in WalkDir::new(folder)
- .follow_links(false)
-    .into_iter()
-    .filter_entry(should_visit)
-    {
-        let entry = match entry {
-            std::result::Result::Ok(entry) => entry,
-            Err(error) => {
-                eprintln!("Impossible d'accéder à un élément : {error}");
-                continue;
-            }
-        };
+    WalkBuilder::new(folder)
+        .standard_filters(false) // désactive .gitignore, fichiers cachés, etc.
+        .follow_links(false)
+        .filter_entry(should_visit)
+        .build_parallel()
+        .run(|| {
+            let tx = tx.clone();
+            let errors = &errors;
+            Box::new(move |entry| {
+                match entry {
+                    Ok(entry) if entry.file_type().is_some_and(|t| t.is_file()) => {
+                        let _ = tx.send(entry.into_path());
+                    }
+                    Ok(_) => {}
+                    Err(_) => {
+                        errors.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+                WalkState::Continue
+            })
+        });
 
-        if !entry.file_type().is_file(){
-            continue;
+    drop(tx); // ferme le canal pour que la boucle ci-dessous se termine
+
+    let mut index = FileIndex::new();
+    for path in rx {
+        if let Some(name) = path.file_name() {
+            let key = name.to_string_lossy().to_lowercase();
+            index.entry(key).or_default().push(path);
         }
-
-        let path = entry.into_path();
-
-        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
-            continue;
-        };
-        index
-        .entry(file_name.to_ascii_lowercase())
-        .or_default()
-        .push(path);
     }
+
+    eprintln!("{} élément(s) inaccessible(s)", errors.load(Ordering::Relaxed));
     Ok(index)
 }
 
@@ -74,6 +83,19 @@ let mut index = FileIndex::new();
 
 pub fn search_file(file:&FileIndex, pattern:&str) -> Result<Vec<PathBuf>>{
     let now = Instant::now();
+    let is_glob = pattern
+        .chars()
+        .any(|c| matches!(c, '*' | '?' | '[' | '{'));
+
+    // Nom exact : une seule recherche dans la table, pas de parcours
+    if !is_glob {
+        let mut results = file
+            .get(&pattern.to_lowercase())
+            .cloned()
+            .unwrap_or_default();
+        results.sort();
+        return Ok(results);
+    }
 
     let glob = GlobBuilder::new(pattern)
         .case_insensitive(true)
@@ -81,15 +103,13 @@ pub fn search_file(file:&FileIndex, pattern:&str) -> Result<Vec<PathBuf>>{
         .build()?
         .compile_matcher();
 
-    let mut results = Vec::new();
+    let mut results: Vec<PathBuf> = file
+    .iter()
+    .filter(|(name, _)| glob.is_match(name.as_str()))
+    .flat_map(|(_, paths)| paths.iter().cloned())
+    .collect();
 
-    for (file_name, paths) in file {
-        if glob.is_match(file_name){
-            results.extend(paths.iter().cloned());
-        }
-    }
-
-    
+    results.sort();
      println!(
         "{} résultat(s) trouvé(s) en {:.2} seconde",
         results.len(),

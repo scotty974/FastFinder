@@ -6,4 +6,5 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0.104"
 globset = "0.4.20"
+ignore = "0.4.33"
 walkdir = "2.5.0"

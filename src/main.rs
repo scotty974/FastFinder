@@ -20,7 +20,7 @@ fn main()->Result<()>{
     
 let start = Instant::now();
 
-    let results = search::search_file(&index, "*codebook*")?;
+    let results = search::search_file(&index, "*landingpage*")?;
 
      println!(
         "Recherche : {:.3} secondes",
