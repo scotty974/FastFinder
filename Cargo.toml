@@ -1,0 +1,9 @@
+[package]
+name = "finder"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.104"
+globset = "0.4.20"
+walkdir = "2.5.0"
