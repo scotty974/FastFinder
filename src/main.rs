@@ -127,12 +127,15 @@ impl App {
         if self.results.is_empty() {
             return;
         }
+        // Lu AVANT ctx.input : on ne doit jamais appeler ctx.memory dans la closure de ctx.input
+        let text_focused = ctx.memory(|m| m.focused().is_some());
+
         let (down, up, enter) = ctx.input(|i| {
             (
                 i.key_pressed(egui::Key::ArrowDown),
                 i.key_pressed(egui::Key::ArrowUp),
                 // Entrée n'ouvre un fichier que si le champ de recherche n'a pas le focus
-                i.key_pressed(egui::Key::Enter) && ctx.memory(|m| m.focused().is_none()),
+                i.key_pressed(egui::Key::Enter) && !text_focused,
             )
         });
         let last = self.results.len() - 1;
