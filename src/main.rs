@@ -131,7 +131,8 @@ impl App {
             (
                 i.key_pressed(egui::Key::ArrowDown),
                 i.key_pressed(egui::Key::ArrowUp),
-                i.key_pressed(egui::Key::Enter),
+                // Entrée n'ouvre un fichier que si le champ de recherche n'a pas le focus
+                i.key_pressed(egui::Key::Enter) && ctx.memory(|m| m.focused().is_none()),
             )
         });
         let last = self.results.len() - 1;
@@ -156,17 +157,31 @@ impl eframe::App for App {
         egui::Panel::top("search")
             .frame(egui::Frame::new().inner_margin(Margin::same(16)))
             .show(ui, |ui| {
-                let response = ui.add_enabled(
-                    self.index.is_some(),
-                    egui::TextEdit::singleline(&mut self.query)
-                        .font(FontId::proportional(18.0))
-                        .desired_width(f32::INFINITY)
-                        .margin(Margin::symmetric(12, 10))
-                        .hint_text("Nom de fichier ou motif (*.pdf)"),
-                );
-                if response.changed() {
-                    self.run_search();
-                }
+                let enabled = self.index.is_some();
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // Ajouté en premier = placé à droite
+                    let button = ui.add_enabled(
+                        enabled,
+                        egui::Button::new(RichText::new("Rechercher").size(16.0))
+                            .min_size(vec2(110.0, 40.0)),
+                    );
+
+                    let response = ui.add_enabled(
+                        enabled,
+                        egui::TextEdit::singleline(&mut self.query)
+                            .font(FontId::proportional(18.0))
+                            .desired_width(f32::INFINITY)
+                            .margin(Margin::symmetric(12, 10))
+                            .hint_text("Nom de fichier ou motif (*.pdf)"),
+                    );
+
+                    let enter = response.lost_focus()
+                        && ui.input(|i| i.key_pressed(egui::Key::Enter));
+
+                    if button.clicked() || enter {
+                        self.run_search();
+                    }
+                });
             });
 
         egui::Panel::bottom("status")
